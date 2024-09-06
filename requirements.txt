@@ -4,3 +4,4 @@ aiofiles
 openai
 tantivy
 cohere
+pandas
