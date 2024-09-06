@@ -10,11 +10,14 @@ import json
 import lancedb
 from lancedb.rerankers import CohereReranker
 from collections import deque
+from fastapi.responses import StreamingResponse
 
 # Request body schema
 class ChatMessage(BaseModel):
     message: str
+    rerank: Optional[bool] = False  # Rerank flag, default to False
     stream: Optional[bool] = False  # Stream flag, default to False
+    reset: Optional[bool] = False  # Reset flag, default to False
 
 client = OpenAI(
     # This is the default and can be omitted
@@ -67,9 +70,31 @@ def save_chat_history(chat_history):
 # Initialize chat history
 chat_history = load_chat_history()
 
-def search_knowledge_base(query):
+def search_knowledge_base(query, rerank=False):
     # Search the knowledge base for the query
+    if not rerank:
+        return table.search(query, query_type="hybrid").limit(10).to_pandas()["text"].to_list()
     return table.search(query, query_type="hybrid").limit(10).rerank(reranker=reranker).to_pandas()["text"].to_list()
+
+async def chat_streamer(user_messages, chat_history):
+    message_response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "system",
+                "content": system_message,
+            }
+        ] + list(user_messages),
+        temperature=0,
+        stream=True
+    )
+    final_response = ""
+    for chunk in message_response:
+        final_response += chunk.choices[0].delta.content
+        yield chunk.choices[0].delta.content
+    
+    user_messages.append({"role": "assistant", "content": final_response})
+    save_chat_history(chat_history)
 
 # Dependency to check API key
 def get_api_key(x_api_key: str = Header(...)):
@@ -88,7 +113,7 @@ messages = []
 async def chat(message: ChatMessage, api_key: str = Depends(get_api_key)):
     hashed_api_key = hash_api_key(api_key)
     
-    if hashed_api_key not in chat_history:
+    if hashed_api_key not in chat_history or message.reset:
         chat_history[hashed_api_key] = deque(maxlen=10)
 
     user_messages = chat_history[hashed_api_key]
@@ -111,6 +136,7 @@ async def chat(message: ChatMessage, api_key: str = Depends(get_api_key)):
         model=model,
         tools=tools,
         temperature=0,
+        tool_choice={"type": "function", "function": {"name": "search_knowledge_base"}}
     )
     
     response_message = response.choices[0].message
@@ -119,25 +145,30 @@ async def chat(message: ChatMessage, api_key: str = Depends(get_api_key)):
         tool_call_id = response_message.tool_calls[0].id
         tool_function_name = response_message.tool_calls[0].function.name
         tool_query_string = json.loads(response_message.tool_calls[0].function.arguments)['query']
-        search_result = search_knowledge_base(tool_query_string)
+        search_result = search_knowledge_base(tool_query_string, message.rerank)
         user_messages.append({
             "role": "tool",
             "tool_call_id": tool_call_id,
             "name": tool_function_name,
             "content": json.dumps(search_result)
         })
-        message_response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_message,
-                }
-            ] + list(user_messages),
-            temperature=0
-        )
-        save_chat_history(chat_history)
-        return message_response.choices[0].message.content
+        
+        if not message.stream:
+            message_response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": system_message,
+                    }
+                ] + list(user_messages),
+                temperature=0
+            )
+            user_messages.append(message_response.dict())
+            save_chat_history(chat_history)
+            return message_response.choices[0].message.content
+        else:
+            StreamingResponse(chat_streamer(user_messages, chat_history))
     else:
         user_messages.append(response_message.dict())
         save_chat_history(chat_history)
