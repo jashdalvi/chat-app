@@ -3,3 +3,4 @@ lancedb
 aiofiles
 openai
 tantivy
+cohere
