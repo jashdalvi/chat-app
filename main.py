@@ -90,8 +90,9 @@ async def chat_streamer(user_messages, chat_history):
     )
     final_response = ""
     for chunk in message_response:
-        final_response += chunk.choices[0].delta.content
-        yield chunk.choices[0].delta.content
+        if chunk.choices[0].delta.content:
+            final_response += chunk.choices[0].delta.content
+            yield chunk.choices[0].delta.content
     
     user_messages.append({"role": "assistant", "content": final_response})
     save_chat_history(chat_history)
