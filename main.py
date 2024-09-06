@@ -170,7 +170,7 @@ async def chat(message: ChatMessage, api_key: str = Depends(get_api_key)):
             save_chat_history(chat_history)
             return message_response.choices[0].message.content
         else:
-            StreamingResponse(chat_streamer(user_messages, chat_history))
+            return StreamingResponse(chat_streamer(user_messages, chat_history))
     else:
         user_messages.append(response_message.dict())
         save_chat_history(chat_history)
