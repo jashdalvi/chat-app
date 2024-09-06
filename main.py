@@ -26,7 +26,7 @@ uri = "./db"
 db = lancedb.connect(uri)
 table = db.open_table("artisan")
 reranker = CohereReranker()
-base_path = "."
+base_path = "/var/data"
 
 model = "gpt-4o"
 system_message = "You are a helpful assistant named Ava that helps with customer service. You work for a company named Artisan. You are a friendly and knowledgeable assistant that is always ready to help. Make sure you call the function search_knowledge_base to search the knowledge base for additional information. Also search the knowledge base when the user asks the question like 'what can you do?' or 'what do you know?'."
