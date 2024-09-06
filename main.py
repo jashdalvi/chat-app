@@ -126,7 +126,8 @@ async def chat(message: ChatMessage, api_key: str = Depends(get_api_key)):
         "role": "user",
         "content": message.message,
     })
-    
+    # Generate a query to search the knowledge base
+    # this is helpful for follow-up questions and ambigious queries
     response = client.chat.completions.create(
         messages=[
             {
