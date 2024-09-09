@@ -25,14 +25,23 @@ client = OpenAI(
 )
 
 # Open the database for hybrid search
-uri = "./db"
-db = lancedb.connect(uri)
-table = db.open_table("artisan")
-reranker = CohereReranker()
-base_path = "/var/data"
+uri = "./db"  # Define the URI for the database
+db = lancedb.connect(uri)  # Connect to the LanceDB database using the specified URI
+table = db.open_table("artisan")  # Open the "artisan" table in the database
+reranker = CohereReranker()  # Initialize a reranker using Cohere's reranking model
+base_path = "/var/data"  # Define the base path for storing data files
+base_path = "."
 
 model = "gpt-4o"
-system_message = "You are a helpful assistant named Ava that helps with customer service. You work for a company named Artisan. You are a friendly and knowledgeable assistant that is always ready to help. Make sure you call the function search_knowledge_base to search the knowledge base for additional information. Also search the knowledge base when the user asks the question like 'what can you do?' or 'what do you know?'."
+system_message = (
+    "You are a helpful assistant named Ava that helps with customer service. "
+    "You work for a company named Artisan. You are a friendly and knowledgeable assistant "
+    "that is always ready to help. Make sure you call the function search_knowledge_base to search "
+    "the knowledge base for additional information. Also search the knowledge base when the user asks "
+    "the question like 'what can you do?' or 'what do you know?'."
+)
+
+# Define tools for the assistant
 tools = [{
     "type": "function",
     "function": {
@@ -70,12 +79,15 @@ def save_chat_history(chat_history):
 # Initialize chat history
 chat_history = load_chat_history()
 
+# Function to search the knowledge base
 def search_knowledge_base(query, rerank=False):
     # Search the knowledge base for the query
     if not rerank:
         return table.search(query, query_type="hybrid").limit(10).to_pandas()["text"].to_list()
     return table.search(query, query_type="hybrid").limit(10).rerank(reranker=reranker).to_pandas()["text"].to_list()
 
+
+# Async generator to stream chat responses
 async def chat_streamer(user_messages, chat_history):
     message_response = client.chat.completions.create(
         model=model,
@@ -122,6 +134,7 @@ async def chat(message: ChatMessage, api_key: str = Depends(get_api_key)):
     if len(user_messages) > 0 and user_messages[0]["role"] == "tool":
         user_messages.popleft()
     
+    # Add the user message to the chat history
     user_messages.append({
         "role": "user",
         "content": message.message,
@@ -143,11 +156,14 @@ async def chat(message: ChatMessage, api_key: str = Depends(get_api_key)):
     
     response_message = response.choices[0].message
     if response_message.tool_calls:
+        # Add the response message to the chat history
         user_messages.append(response_message.dict())
         tool_call_id = response_message.tool_calls[0].id
         tool_function_name = response_message.tool_calls[0].function.name
         tool_query_string = json.loads(response_message.tool_calls[0].function.arguments)['query']
+        # Call the tool function to search the knowledge base
         search_result = search_knowledge_base(tool_query_string, message.rerank)
+        # Add the search result to the chat history
         user_messages.append({
             "role": "tool",
             "tool_call_id": tool_call_id,
@@ -155,6 +171,7 @@ async def chat(message: ChatMessage, api_key: str = Depends(get_api_key)):
             "content": json.dumps(search_result)
         })
         
+        # Stream the chat responses if the stream flag is set
         if not message.stream:
             message_response = client.chat.completions.create(
                 model=model,
@@ -166,11 +183,11 @@ async def chat(message: ChatMessage, api_key: str = Depends(get_api_key)):
                 ] + list(user_messages),
                 temperature=0
             )
-            user_messages.append(message_response.dict())
+            user_messages.append({"role": "assistant", "content": message_response.choices[0].message.content})
             save_chat_history(chat_history)
             return message_response.choices[0].message.content
         else:
-            return StreamingResponse(chat_streamer(user_messages, chat_history))
+            return StreamingResponse(chat_streamer(user_messages, chat_history), media_type='text/event-stream')
     else:
         user_messages.append(response_message.dict())
         save_chat_history(chat_history)
