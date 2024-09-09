@@ -30,7 +30,6 @@ db = lancedb.connect(uri)  # Connect to the LanceDB database using the specified
 table = db.open_table("artisan")  # Open the "artisan" table in the database
 reranker = CohereReranker()  # Initialize a reranker using Cohere's reranking model
 base_path = "/var/data"  # Define the base path for storing data files
-base_path = "."
 
 model = "gpt-4o"
 system_message = (
